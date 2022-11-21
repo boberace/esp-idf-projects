@@ -20,7 +20,54 @@
 extern const char root_start[] asm("_binary_root_html_start");
 extern const char root_end[] asm("_binary_root_html_end");
 
+extern const char first_page_start[] asm("_binary_first_page_html_start");
+extern const char first_page_end[] asm("_binary_first_page_html_end");
+
 static const char *TAG = "example";
+
+
+static void wifi_event_handler(void *arg, esp_event_base_t event_base,
+                               int32_t event_id, void *event_data);
+static void wifi_init_softap(void);
+static esp_err_t root_get_handler(httpd_req_t *req);
+static esp_err_t first_page_get_handler(httpd_req_t *req);
+esp_err_t http_404_error_handler(httpd_req_t *req, httpd_err_code_t err);
+static httpd_handle_t start_webserver(void);
+
+
+void app_main(void)
+{
+    /*
+        Turn of warnings from HTTP server as redirecting traffic will yield
+        lots of invalid requests
+    */
+    esp_log_level_set("httpd_uri", ESP_LOG_ERROR);
+    esp_log_level_set("httpd_txrx", ESP_LOG_ERROR);
+    esp_log_level_set("httpd_parse", ESP_LOG_ERROR);
+
+
+    // Initialize networking stack
+    ESP_ERROR_CHECK(esp_netif_init());
+
+    // Create default event loop needed by the  main app
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+    // Initialize NVS needed by Wi-Fi
+    ESP_ERROR_CHECK(nvs_flash_init());
+
+    // Initialize Wi-Fi including netif with default config
+    esp_netif_create_default_wifi_ap();
+
+    // Initialise ESP32 in SoftAP mode
+    wifi_init_softap();
+
+    // Start the server for the first time
+    start_webserver();
+
+    // Start the DNS server that will redirect all queries to the softAP IP
+    start_dns_server();
+}
+
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data)
@@ -89,6 +136,24 @@ static const httpd_uri_t root = {
     .handler = root_get_handler
 };
 
+
+static esp_err_t first_page_get_handler(httpd_req_t *req)
+{
+    const uint32_t first_page_len = first_page_end - first_page_start;
+
+    ESP_LOGI(TAG, "Serve first page");
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, first_page_start, first_page_len);
+
+    return ESP_OK;
+}
+
+static const httpd_uri_t first_page = {
+    .uri = "/first_page",
+    .method = HTTP_GET,
+    .handler = first_page_get_handler
+};
+
 // HTTP Error (404) Handler - Redirects all requests to the root page
 esp_err_t http_404_error_handler(httpd_req_t *req, httpd_err_code_t err)
 {
@@ -116,40 +181,8 @@ static httpd_handle_t start_webserver(void)
         // Set URI handlers
         ESP_LOGI(TAG, "Registering URI handlers");
         httpd_register_uri_handler(server, &root);
+        httpd_register_uri_handler(server, &first_page);
         httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, http_404_error_handler);
     }
     return server;
-}
-
-void app_main(void)
-{
-    /*
-        Turn of warnings from HTTP server as redirecting traffic will yield
-        lots of invalid requests
-    */
-    esp_log_level_set("httpd_uri", ESP_LOG_ERROR);
-    esp_log_level_set("httpd_txrx", ESP_LOG_ERROR);
-    esp_log_level_set("httpd_parse", ESP_LOG_ERROR);
-
-
-    // Initialize networking stack
-    ESP_ERROR_CHECK(esp_netif_init());
-
-    // Create default event loop needed by the  main app
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-
-    // Initialize NVS needed by Wi-Fi
-    ESP_ERROR_CHECK(nvs_flash_init());
-
-    // Initialize Wi-Fi including netif with default config
-    esp_netif_create_default_wifi_ap();
-
-    // Initialise ESP32 in SoftAP mode
-    wifi_init_softap();
-
-    // Start the server for the first time
-    start_webserver();
-
-    // Start the DNS server that will redirect all queries to the softAP IP
-    start_dns_server();
 }
